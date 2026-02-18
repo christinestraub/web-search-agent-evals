@@ -60,7 +60,7 @@
 
 import { MCP_SERVERS, type McpServerKey } from "../mcp-servers.ts";
 import type { Agent, RunConfig, SearchProvider } from "./shared/shared.types.ts";
-import { ALL_AGENTS } from "./shared/shared.constants.ts";
+
 import { limitConcurrency } from "./shared/concurrency-limiter.ts";
 import { runDockerScenario } from "./shared/docker-runner.ts";
 import { createStatusHeartbeat, printResultsSummary, handleExit } from "./shared/reporting.ts";
@@ -297,12 +297,7 @@ const main = async () => {
           "/workspace/runs",
         ];
 
-        const envVars = [
-          "-e",
-          `SEARCH_PROVIDER=${searchProvider}`,
-          "-e",
-          `PROMPT_CONCURRENCY=${promptConcurrency}`,
-        ];
+        const envVars = ["-e", `SEARCH_PROVIDER=${searchProvider}`, "-e", `PROMPT_CONCURRENCY=${promptConcurrency}`];
         if (options.trialType !== "default") {
           envVars.push("-e", `TRIAL_TYPE=${options.trialType}`);
         }
