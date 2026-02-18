@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "name": "gemini",
+  "command": ["gemini"],
+  "sessionMode": "iterative",
+  "prompt": {
+    "flag": ""
+  },
+  "output": {
+    "flag": "--output-format",
+    "value": "stream-json"
+  },
+  "autoApprove": ["--sandbox", "false", "--allowed-mcp-server-names", "ydc-server"],
+  "outputEvents": [
+    {
+      "match": { "path": "$.type", "value": "message" },
+      "emitAs": "message",
+      "extract": { "content": "$.content" }
+    },
+    {
+      "match": { "path": "$.type", "value": "tool_use" },
+      "emitAs": "tool_call",
+      "extract": {
+        "name": "$.tool_name",
+        "title": "$.tool_name",
+        "status": "'pending'"
+      }
+    },
+    {
+      "match": { "path": "$.type", "value": "tool_result" },
+      "emitAs": "tool_call",
+      "extract": { "title": "$.tool_id", "status": "'completed'" }
+    }
+  ],
+  "result": {
+    "matchPath": "$.type",
+    "matchValue": "result",
+    "contentPath": "$.output"
+  },
+  "historyTemplate": "User: {{input}}\nAssistant: {{output}}"
+}

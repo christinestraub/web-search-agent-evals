@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "name": "droid",
+  "command": ["droid", "exec"],
+  "sessionMode": "stream",
+  "prompt": {
+    "flag": ""
+  },
+  "output": {
+    "flag": "-o",
+    "value": "stream-json"
+  },
+  "cwdFlag": "--cwd",
+  "autoApprove": ["--skip-permissions-unsafe"],
+  "resume": {
+    "flag": "-s",
+    "sessionIdPath": "$.session_id"
+  },
+  "outputEvents": [
+    {
+      "match": { "path": "$.type", "value": "message", "role": "assistant" },
+      "emitAs": "message",
+      "extract": { "content": "$.text" }
+    },
+    {
+      "match": { "path": "$.type", "value": "tool_call" },
+      "emitAs": "tool_call",
+      "extract": {
+        "name": "$.toolName",
+        "title": "$.toolName",
+        "status": "'pending'"
+      }
+    },
+    {
+      "match": { "path": "$.type", "value": "tool_result" },
+      "emitAs": "tool_call",
+      "extract": { "title": "$.id", "status": "'completed'" }
+    }
+  ],
+  "result": {
+    "matchPath": "$.type",
+    "matchValue": "completion",
+    "contentPath": "$.finalText"
+  }
+}

@@ -1,0 +1,52 @@
+# dependencies (bun install)
+node_modules
+
+# output
+out
+dist
+*.tgz
+
+# code coverage
+coverage
+*.lcov
+
+# logs
+logs
+*.log
+report.*.json
+
+# dotenv environment variable files
+.env
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
+
+# caches
+.eslintcache
+.cache
+*.tsbuildinfo
+
+# IntelliJ based IDEs
+.idea
+
+# Finder (MacOS) folder config
+.DS_Store
+
+# Evaluation results - committed for downstream data science analysis
+# Only ignore temporary/debug files
+data/results/**/*-debug.jsonl
+data/results/**/*-temp.jsonl
+
+# Calibration reports - ephemeral working files regenerated on demand
+data/calibration/
+
+# backup files
+*.bak
+
+# claude
+settings.local.json
+
+# Planning
+CI-SPEC.md
+data/prompts/full/prompts-without-hints.jsonl

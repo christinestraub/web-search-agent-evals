@@ -1,0 +1,7 @@
+# Code Owners for Web Search Agent Evaluations
+#
+# These owners will be requested for review when someone opens a pull request.
+# Order is important; the last matching pattern takes precedence.
+
+# Default owners for everything in the repo
+* @edwardirby @zairahms @davidli3100
