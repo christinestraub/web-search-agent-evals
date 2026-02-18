@@ -57,91 +57,18 @@
  * @public
  */
 
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { MCP_SERVERS, type McpServerKey } from "../mcp-servers.ts";
-import type { Agent, Mode, RunConfig, SearchProvider } from "./shared/shared.types.ts";
-import { ALL_AGENTS } from "./shared/shared.constants.ts";
+import type { Mode, RunConfig, SearchProvider } from "./shared/shared.types.ts";
 import { limitConcurrency } from "./shared/concurrency-limiter.ts";
 import { runDockerScenario } from "./shared/docker-runner.ts";
 import { createStatusHeartbeat, printResultsSummary, handleExit } from "./shared/reporting.ts";
-
-type RunOptions = {
-  agents: Agent[];
-  mode?: Mode;
-  searchProvider?: SearchProvider;
-  concurrency?: number;
-  promptConcurrency?: number;
-  dryRun?: boolean;
-};
-
-const parseArgs = (args: string[]): RunOptions => {
-  const agents: Agent[] = [];
-  let mode: Mode | undefined;
-  let searchProvider: SearchProvider | undefined;
-  let concurrency: number | undefined;
-  let promptConcurrency: number | undefined;
-  let dryRun = false;
-
-  const validProviders = ["builtin", ...Object.keys(MCP_SERVERS)];
-
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--agent" && i + 1 < args.length) {
-      const agent = args[i + 1];
-      if (!ALL_AGENTS.includes(agent as Agent)) {
-        throw new Error(`Invalid agent: ${agent}. Must be one of: ${ALL_AGENTS.join(", ")}`);
-      }
-      agents.push(agent as Agent);
-      i++;
-    } else if (args[i] === "--mode" && i + 1 < args.length) {
-      const m = args[i + 1];
-      if (m !== "test" && m !== "full") {
-        throw new Error(`Invalid mode: ${m}. Must be "test" or "full"`);
-      }
-      mode = m;
-      i++;
-    } else if ((args[i] === "--search-provider" || args[i] === "--mcp") && i + 1 < args.length) {
-      const tool = args[i + 1];
-      if (!validProviders.includes(tool as string)) {
-        throw new Error(`Invalid search provider: ${tool}. Must be one of: ${validProviders.join(", ")}`);
-      }
-      searchProvider = tool as SearchProvider;
-      i++;
-    } else if ((args[i] === "-j" || args[i] === "--concurrency") && i + 1 < args.length) {
-      const arg = args[i + 1]!;
-      const value = Number.parseInt(arg, 10);
-      if (Number.isNaN(value) || value < 0) {
-        throw new Error(`Invalid concurrency: ${arg}. Must be a non-negative integer (0 for unlimited)`);
-      }
-      concurrency = value === 0 ? Infinity : value;
-      i++;
-    } else if (args[i] === "--prompt-concurrency" && i + 1 < args.length) {
-      const arg = args[i + 1]!;
-      const value = Number.parseInt(arg, 10);
-      if (Number.isNaN(value) || value < 1) {
-        throw new Error(`Invalid prompt-concurrency: ${arg}. Must be a positive integer`);
-      }
-      promptConcurrency = value;
-      i++;
-    } else if (args[i] === "--dry-run") {
-      dryRun = true;
-    }
-  }
-
-  return {
-    agents: agents.length > 0 ? agents : ALL_AGENTS,
-    mode,
-    searchProvider,
-    concurrency: concurrency ?? Infinity, // Default unlimited (I/O-bound workload)
-    promptConcurrency: promptConcurrency ?? 1, // Default 1: stream-mode agents OOM at higher values (see issue #45)
-    dryRun,
-  };
-};
+import { parseCommonArgs } from "./shared/args.ts";
 
 const detectCurrentMode = async (): Promise<Mode> => {
   // Check TypeScript entrypoint for DATASET variable default
   const entrypointFile = join(process.cwd(), "docker", "entrypoint");
-  const content = await readFile(entrypointFile, "utf-8");
+  const content = await Bun.file(entrypointFile).text();
 
   const datasetMatch = content.match(/const DATASET = process\.env\.DATASET \|\| "(\w+)"/);
   if (datasetMatch?.[1]) {
@@ -162,7 +89,11 @@ const main = async () => {
   const args = process.argv.slice(2);
 
   try {
-    const options = parseArgs(args);
+    const options = parseCommonArgs(args);
+
+    // Apply defaults logic that was in parseArgs
+    const concurrency = options.concurrency ?? Infinity;
+    const promptConcurrency = options.promptConcurrency ?? 1;
 
     if (options.dryRun) {
       console.log("[DRY RUN] Validation mode - no docker commands will run\n");
@@ -190,9 +121,9 @@ const main = async () => {
       }
     }
 
-    const concurrencyLabel = options.concurrency === Infinity ? "unlimited" : options.concurrency;
+    const concurrencyLabel = concurrency === Infinity ? "unlimited" : concurrency;
     console.log(
-      `${options.dryRun ? "[DRY RUN] Would run" : "Running"} ${runs.length} scenarios (container concurrency: ${concurrencyLabel}, prompt concurrency: ${options.promptConcurrency})\n`,
+      `${options.dryRun ? "[DRY RUN] Would run" : "Running"} ${runs.length} scenarios (container concurrency: ${concurrencyLabel}, prompt concurrency: ${promptConcurrency})\n`,
     );
 
     if (options.dryRun) {
@@ -201,9 +132,8 @@ const main = async () => {
         const run = runs[i];
         if (!run) continue;
         console.log(
-          `  [${i + 1}/${runs.length}] ${run.agent}-${run.searchProvider}: docker compose run --rm -e SEARCH_PROVIDER=${
-            run.searchProvider
-          } -e DATASET=${currentMode} -e PROMPT_CONCURRENCY=${options.promptConcurrency} ${run.agent}`,
+          `  [${i + 1}/${runs.length}] ${run.agent}-${run.searchProvider}: docker compose run --rm -e SEARCH_PROVIDER=${run.searchProvider
+          } -e DATASET=${currentMode} -e PROMPT_CONCURRENCY=${promptConcurrency} ${run.agent}`,
         );
       }
       console.log("\n[DRY RUN] No services were executed.");
@@ -217,7 +147,7 @@ const main = async () => {
     const statusInterval = createStatusHeartbeat({
       runs,
       completed,
-      concurrency: options.concurrency!,
+      concurrency,
       intervalMs: 30000,
       startTime,
     });
@@ -236,7 +166,7 @@ const main = async () => {
                 "-e",
                 `DATASET=${currentMode}`,
                 "-e",
-                `PROMPT_CONCURRENCY=${options.promptConcurrency}`,
+                `PROMPT_CONCURRENCY=${promptConcurrency}`,
               ],
               label: `[${index + 1}/${runs.length}] ${agent}-${searchProvider}`,
             }).then((result) => {
@@ -244,7 +174,7 @@ const main = async () => {
               return result.exitCode;
             }),
       ),
-      options.concurrency!,
+      concurrency,
     );
 
     clearInterval(statusInterval);

@@ -18,6 +18,7 @@
  * ```bash
  * docker compose run --rm \
  *   -e SEARCH_PROVIDER=you \
+ *   -e DATASET=test \
  *   claude-code \
  *   bunx @plaited/agent-eval-harness trials ...
  * ```
@@ -63,6 +64,7 @@ import { ALL_AGENTS } from "./shared/shared.constants.ts";
 import { limitConcurrency } from "./shared/concurrency-limiter.ts";
 import { runDockerScenario } from "./shared/docker-runner.ts";
 import { createStatusHeartbeat, printResultsSummary, handleExit } from "./shared/reporting.ts";
+import { parseCommonArgs } from "./shared/args.ts";
 
 type TrialType = "default" | "capability" | "regression";
 
@@ -86,26 +88,17 @@ type TrialsOptions = {
  * @public
  */
 const parseArgs = (args: string[]): TrialsOptions => {
-  const agents: Agent[] = [];
+  const common = parseCommonArgs(args);
   const searchProviders: SearchProvider[] = [];
   let trialType: TrialType = "default";
   let dataset: "trials" | "full" = "trials";
   let k: number | undefined;
-  let concurrency: number | undefined;
-  let promptConcurrency: number | undefined;
-  let dryRun = false;
 
   const validProviders = ["builtin", ...Object.keys(MCP_SERVERS)];
 
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--agent" && i + 1 < args.length) {
-      const agentArg = args[i + 1];
-      if (!ALL_AGENTS.includes(agentArg as Agent)) {
-        throw new Error(`Invalid agent: ${agentArg}. Must be one of: ${ALL_AGENTS.join(", ")}`);
-      }
-      agents.push(agentArg as Agent);
-      i++;
-    } else if (args[i] === "--search-provider" && i + 1 < args.length) {
+    if (args[i] === "--search-provider" && i + 1 < args.length) {
+      // Logic for multiple providers or preserving parsed list
       const providerArg = args[i + 1];
       if (!validProviders.includes(providerArg as string)) {
         throw new Error(`Invalid search provider: ${providerArg}. Must be one of: ${validProviders.join(", ")}`);
@@ -136,24 +129,6 @@ const parseArgs = (args: string[]): TrialsOptions => {
         throw new Error(`Invalid k value: ${kArg}. Must be a positive integer`);
       }
       i++;
-    } else if ((args[i] === "-j" || args[i] === "--concurrency") && i + 1 < args.length) {
-      const arg = args[i + 1]!;
-      const value = Number.parseInt(arg, 10);
-      if (Number.isNaN(value) || value < 0) {
-        throw new Error(`Invalid concurrency: ${arg}. Must be a non-negative integer (0 for unlimited)`);
-      }
-      concurrency = value === 0 ? Infinity : value;
-      i++;
-    } else if (args[i] === "--prompt-concurrency" && i + 1 < args.length) {
-      const arg = args[i + 1]!;
-      const value = Number.parseInt(arg, 10);
-      if (Number.isNaN(value) || value < 1) {
-        throw new Error(`Invalid prompt-concurrency: ${arg}. Must be a positive integer`);
-      }
-      promptConcurrency = value;
-      i++;
-    } else if (args[i] === "--dry-run") {
-      dryRun = true;
     }
   }
 
@@ -161,14 +136,14 @@ const parseArgs = (args: string[]): TrialsOptions => {
   const mcpProviders = Object.keys(MCP_SERVERS) as McpServerKey[];
 
   return {
-    agents: agents.length > 0 ? agents : ALL_AGENTS,
+    agents: common.agents,
     trialType,
     dataset,
     searchProviders: searchProviders.length > 0 ? searchProviders : ["builtin", ...mcpProviders],
     k,
-    concurrency: concurrency ?? Infinity, // Default unlimited (I/O-bound workload)
-    promptConcurrency: promptConcurrency ?? 1, // Default 1: stream-mode agents OOM at higher values (see issue #45)
-    dryRun,
+    concurrency: common.concurrency ?? Infinity, // Default unlimited (I/O-bound workload)
+    promptConcurrency: common.promptConcurrency ?? 1, // Default 1: stream-mode agents OOM at higher values (see issue #45)
+    dryRun: common.dryRun,
   };
 };
 
@@ -229,7 +204,10 @@ const main = async () => {
     const options = parseArgs(args);
     const k = getKValue(options.trialType, options.k);
 
-    const concurrencyLabel = options.concurrency === Infinity ? "unlimited" : options.concurrency;
+    const concurrency = options.concurrency ?? Infinity;
+    const promptConcurrency = options.promptConcurrency ?? 1;
+    const concurrencyLabel = concurrency === Infinity ? "unlimited" : concurrency;
+
     const promptCount = options.dataset === "trials" ? 30 : 151;
     console.log(`${options.dryRun ? "[DRY RUN] " : ""}Pass@k Trials Configuration`);
     console.log(`${"=".repeat(80)}`);
@@ -237,7 +215,7 @@ const main = async () => {
     console.log(`Dataset: ${options.dataset} (${promptCount} prompts)`);
     console.log(`Agents: ${options.agents.join(", ")}`);
     console.log(`Search providers: ${options.searchProviders.join(", ")}`);
-    console.log(`Container concurrency: ${concurrencyLabel}, Prompt concurrency: ${options.promptConcurrency}`);
+    console.log(`Container concurrency: ${concurrencyLabel}, Prompt concurrency: ${promptConcurrency}`);
     console.log(`Execution: Docker containers (isolated)`);
     console.log(`${"=".repeat(80)}\n`);
 
@@ -266,9 +244,9 @@ const main = async () => {
         console.log(`    Dataset: ${datasetPath}`);
         console.log(`    Output: ${outputPath}`);
         console.log(`    Trials per prompt: ${k}`);
-        console.log(`    Prompt concurrency: ${options.promptConcurrency}`);
+        console.log(`    Prompt concurrency: ${promptConcurrency}`);
         console.log(
-          `    Docker: docker compose run --rm -e SEARCH_PROVIDER=${run.searchProvider} -e PROMPT_CONCURRENCY=${options.promptConcurrency}${options.trialType !== "default" ? ` -e TRIAL_TYPE=${options.trialType}` : ""} ${run.agent} bunx @plaited/agent-eval-harness trials ... -j ${options.promptConcurrency} -o ${outputPath}\n`,
+          `    Docker: docker compose run --rm -e SEARCH_PROVIDER=${run.searchProvider} -e PROMPT_CONCURRENCY=${promptConcurrency}${options.trialType !== "default" ? ` -e TRIAL_TYPE=${options.trialType}` : ""} ${run.agent} bunx @plaited/agent-eval-harness trials ... -j ${promptConcurrency} -o ${outputPath}\n`,
         );
       }
       console.log("[DRY RUN] No trials were executed.");
@@ -282,7 +260,7 @@ const main = async () => {
     const statusInterval = createStatusHeartbeat({
       runs,
       completed,
-      concurrency: options.concurrency!,
+      concurrency,
       intervalMs: 60000,
       startTime,
     });
@@ -307,7 +285,7 @@ const main = async () => {
           "-k",
           k.toString(),
           "-j",
-          options.promptConcurrency!.toString(),
+          promptConcurrency.toString(),
           "--grader",
           grader,
           "-o",
@@ -323,7 +301,7 @@ const main = async () => {
           "-e",
           `SEARCH_PROVIDER=${searchProvider}`,
           "-e",
-          `PROMPT_CONCURRENCY=${options.promptConcurrency}`,
+          `PROMPT_CONCURRENCY=${promptConcurrency}`,
         ];
         if (options.trialType !== "default") {
           envVars.push("-e", `TRIAL_TYPE=${options.trialType}`);
@@ -335,14 +313,14 @@ const main = async () => {
           envVars,
           command: trialsCmd,
           label: `[${index + 1}/${runs.length}] ${agent}-${searchProvider}`,
-          startBanner: `(k=${k}, prompt-concurrency=${options.promptConcurrency})`,
+          startBanner: `(k=${k}, prompt-concurrency=${promptConcurrency})`,
           stdoutFilter: trialsStdoutFilter,
         }).then((result) => {
           completed.add(index + 1);
           return result.exitCode;
         });
       }),
-      options.concurrency!,
+      concurrency,
     );
 
     clearInterval(statusInterval);

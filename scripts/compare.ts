@@ -65,11 +65,10 @@
  * @public
  */
 
-import { spawn } from "node:child_process";
 import { MCP_SERVERS, type McpServerKey } from "../mcp-servers.ts";
-
 import type { Agent, Mode, SearchProvider } from "./shared/shared.types.ts";
 import { ALL_AGENTS } from "./shared/shared.constants.ts";
+import { parseCommonArgs } from "./shared/args.ts";
 
 type Strategy = "weighted" | "statistical";
 
@@ -86,39 +85,13 @@ type CompareOptions = {
 const ALL_STRATEGIES: Strategy[] = ["weighted", "statistical"];
 
 const parseArgs = (args: string[]): CompareOptions => {
-  const agents: Agent[] = [];
-  let mode: Mode = "test";
-  let searchProvider: SearchProvider | undefined;
+  const common = parseCommonArgs(args);
   let strategy: Strategy = "weighted";
-  let dryRun = false;
   let runDate: string | undefined;
   let fixtureDir: string | undefined;
 
-  const validProviders = ["builtin", ...Object.keys(MCP_SERVERS)];
-
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--agent" && i + 1 < args.length) {
-      const agent = args[i + 1];
-      if (!ALL_AGENTS.includes(agent as Agent)) {
-        throw new Error(`Invalid agent: ${agent}. Must be one of: ${ALL_AGENTS.join(", ")}`);
-      }
-      agents.push(agent as Agent);
-      i++;
-    } else if (args[i] === "--mode" && i + 1 < args.length) {
-      const m = args[i + 1];
-      if (m !== "test" && m !== "full") {
-        throw new Error(`Invalid mode: ${m}. Must be "test" or "full"`);
-      }
-      mode = m;
-      i++;
-    } else if ((args[i] === "--search-provider" || args[i] === "--mcp") && i + 1 < args.length) {
-      const tool = args[i + 1];
-      if (!validProviders.includes(tool as string)) {
-        throw new Error(`Invalid search provider: ${tool}. Must be one of: ${validProviders.join(", ")}`);
-      }
-      searchProvider = tool as SearchProvider;
-      i++;
-    } else if (args[i] === "--strategy" && i + 1 < args.length) {
+    if (args[i] === "--strategy" && i + 1 < args.length) {
       const s = args[i + 1];
       if (!ALL_STRATEGIES.includes(s as Strategy)) {
         throw new Error(`Invalid strategy: ${s}. Must be one of: ${ALL_STRATEGIES.join(", ")}`);
@@ -131,17 +104,15 @@ const parseArgs = (args: string[]): CompareOptions => {
     } else if (args[i] === "--fixture-dir" && i + 1 < args.length) {
       fixtureDir = args[i + 1];
       i++;
-    } else if (args[i] === "--dry-run") {
-      dryRun = true;
     }
   }
 
   return {
-    agents: agents.length > 0 ? agents : ALL_AGENTS,
-    mode,
-    searchProvider,
+    agents: common.agents,
+    mode: common.mode ?? "test", // Default to test mode for compare
+    searchProvider: common.searchProvider,
     strategy,
-    dryRun,
+    dryRun: common.dryRun,
     runDate,
     fixtureDir,
   };
@@ -233,7 +204,7 @@ const runComparison = async (options: CompareOptions): Promise<void> => {
   }
 
   // Build command arguments
-  const args = ["@plaited/agent-eval-harness", "compare"];
+  const args = ["bunx", "@plaited/agent-eval-harness", "compare"];
 
   for (const { agent, searchProvider: provider } of runs) {
     const label = buildRunLabel(agent, provider);
@@ -257,22 +228,8 @@ const runComparison = async (options: CompareOptions): Promise<void> => {
 
   args.push("-o", outputPath);
 
-  // Execute
-  const proc = spawn("bunx", args, { stdio: "inherit" });
-
-  return new Promise((resolve, reject) => {
-    proc.on("close", (code) => {
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error(`Comparison failed with exit code ${code}`));
-      }
-    });
-
-    proc.on("error", (err) => {
-      reject(err);
-    });
-  });
+  // Execute using Bun.$
+  await Bun.$`${args}`;
 };
 
 const main = async () => {

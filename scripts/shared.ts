@@ -9,3 +9,4 @@ export {
   printResultsSummary,
   handleExit,
 } from "./shared/reporting.ts";
+export { parseCommonArgs, type CommonOptions } from "./shared/args.ts";
